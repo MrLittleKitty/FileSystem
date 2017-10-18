@@ -32,6 +32,7 @@ public class FileSystem {
     //L = number of blocks of disk space
     //B = size of a block in bytes
     //k = number of file descriptors
+    //TODO----Theoretically Complete
     public FileSystem(int L, int k, int maxOpenFiles) {
 
         this.disk = new LDisk(L);
@@ -60,6 +61,7 @@ public class FileSystem {
     }
 
     //Create a file
+    //TODO----Theoretically Complete
     public void create(String fileName) {
 
         if (fileName.length() > 4) {
@@ -135,6 +137,7 @@ public class FileSystem {
     }
 
     //Returns the file handle as an int
+    //TODO---Theoretically Complete
     public int open(String fileName) {
 
         //Seek to the start of the directory
@@ -236,11 +239,18 @@ public class FileSystem {
         OpenFile file = openFileTable[handle];
         if (file != null) {
 
-            if (position == 0 || (position >= 0 && position < file.fileLength)) {
+            int currentBlock = file.currentPosition / LDisk.BLOCK_SIZE;
+            int newBlock = position / LDisk.BLOCK_SIZE;
 
-                //Get the block number that we need to load into the buffer
-                int blockNum = position / LDisk.BLOCK_SIZE;
+            if(position >= file.fileLength || newBlock < 0 || newBlock > 2) {
+                System.out.println("Attempted to seek to an invalid position");
+                return;
+            }
 
+            if(currentBlock == newBlock) {
+                file.currentPosition = position;
+            }
+            else {
                 byte[] block = new byte[LDisk.BLOCK_SIZE];
 
                 //Read in the descriptor for this file
@@ -248,7 +258,17 @@ public class FileSystem {
 
                 //Get the index of the correct block from the descriptor
                 FileDescriptor descriptor = new FileDescriptor(block);
-                int blockIndex = descriptor.blockIndices[blockNum];
+                int oldBlockIndex = descriptor.blockIndices[currentBlock];
+
+                //Write the buffer to the disk
+                disk.write_block(oldBlockIndex, file.buffer);
+
+                int blockIndex = descriptor.blockIndices[newBlock];
+
+                //This means that there is no allocated space for this data block
+                if(blockIndex == 0) {
+
+                }
 
                 //Read in the block
                 disk.read_block(blockIndex, block);
@@ -256,8 +276,7 @@ public class FileSystem {
                 //Set the new position for the open file and set the buffer correctly
                 file.currentPosition = position;
                 file.buffer = block;
-            } else
-                System.out.println("Attempted to seek to an invalid position on the file");
+            }
         } else
             System.out.println("Attempted to seek on an invalid file handle");
     }
