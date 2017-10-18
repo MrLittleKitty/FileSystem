@@ -62,7 +62,7 @@ public class FileSystem {
     }
 
     //Create a file
-    //TODO----Theoretically Complete
+    //TODO---Theoretically Complete
     public void create(String fileName) {
 
         if (fileName.length() > 4) {
@@ -93,10 +93,18 @@ public class FileSystem {
             lseek(0, 0);
 
             byte[] slot = new byte[8];
-            int foundIndex = 0;
+
+            OpenFile directoryFile = openFileTable[0];
+            int position = 0;
 
             //Go through all the slots in the directory and look for an open one
             while (true) {
+                position += 8;
+
+                //Doing another read would put us past the end of the file
+                if(position > directoryFile.fileLength)
+                    break;
+
                 int bytesRead = read(0, slot, 8);
 
                 if (bytesRead != 8) {
@@ -110,9 +118,9 @@ public class FileSystem {
                 if (directorySlot.descriptorIndex == 0) {
                     break;
                 }
-
-                foundIndex += 8;
             }
+
+            position -= 8;
 
             DirectorySlot newSlot = new DirectorySlot();
             newSlot.name = fileName.toCharArray();
@@ -125,7 +133,7 @@ public class FileSystem {
             disk.write_block(freeBlockIndex, descriptor.getBytes());
             setBlockUsed(freeBlockIndex);
 
-            lseek(0,foundIndex);
+            lseek(0,position);
             write(0,newSlot.getBytes(),8);
 
         } else
@@ -138,7 +146,7 @@ public class FileSystem {
     }
 
     //Returns the file handle as an int
-
+    //TODO---Theoretically Complete
     public int open(String fileName) {
 
         //Seek to the start of the directory
@@ -147,9 +155,20 @@ public class FileSystem {
         DirectorySlot slot = null;
         byte[] fileSlot = new byte[8];
 
+        OpenFile directoryFile = openFileTable[0];
+        int position = 0;
+
         outer:
         while (true) {
-            //TODO---We should only read to the end of the file(file length field)
+            position += 8;
+
+            //If the next read would put us past the end of the file then there is no file with that name and we return
+            if(position > directoryFile.fileLength)
+            {
+                System.out.println("Could not find the file with the given name. Reached EOF.");
+                return -1;
+            }
+
             int bytesRead = read(0, fileSlot, 8);
 
             if (bytesRead != 8) {
@@ -158,7 +177,7 @@ public class FileSystem {
             }
 
             slot = new DirectorySlot(fileSlot);
-            if (slot.descriptorIndex == 0) //If the descriptor index points to the bitmap it is an empty slot
+            if (slot.descriptorIndex != 0) //If the descriptor index points to the bitmap it is an empty slot
                 continue;
 
             char[] name = fileName.toCharArray();
@@ -195,7 +214,24 @@ public class FileSystem {
 
             file.fileLength = descriptor.fileLength;
             file.buffer = new byte[LDisk.BLOCK_SIZE];
-            disk.read_block(descriptor.blockIndices[0], file.buffer);
+
+            //If the index of the first data block is 0 then the block hasnt been allocated yet
+            if(descriptor.blockIndices[0] == 0) {
+                descriptor.blockIndices[0] = allocateNewDataBlock();
+
+                if(descriptor.blockIndices[0] == -1) {
+                    System.out.println("There are no free data blocks to allocate for this file");
+                    return -1;
+                }
+
+                //Write the descriptor to disk to make sure the indices are good
+                disk.write_block(slot.descriptorIndex, descriptor.getBytes());
+
+                //Since we just allocated the block it will be empty and we don't have to read from disk
+                Arrays.fill(file.buffer, (byte)0);
+            }
+            else
+             disk.read_block(descriptor.blockIndices[0], file.buffer);
 
             return openFileIndex;
         } else {
@@ -212,17 +248,23 @@ public class FileSystem {
     //Copies the "count" number of bytes from the given file into the mem_area
     public int read(int handle, byte[] mem_area, int count) {
 
-//        if(handle < 0 || handle >= openFileTable.length)
-//            throw new IndexOutOfBoundsException();
-//
-//        OpenFile file = openFileTable[handle];
-//        if(file != null) {
-//
-//        }
-//        else
-//            System.out.println("Attempted to read from an invalid file handle");
+        if(handle < 0 || handle >= openFileTable.length)
+            throw new IndexOutOfBoundsException("Attempted to read from an invalid file handle");
 
-        throw new NotImplementedException();
+        OpenFile file = openFileTable[handle];
+        if(file == null)
+            throw new IndexOutOfBoundsException("Attempted to read from an invalid file handle");
+
+        int bytesRead = 0;
+        int position = file.currentPosition;
+
+        //This is the loop that is going to read each individual byte
+        //position + index needs to be less than file length so we don't read past the end of the file
+        for(int index = 0; index < count && position + index < file.fileLength; index++) {
+
+        }
+
+        return bytesRead;
     }
 
     //Writes the "count" number of bytes from the mem_area into the given file
