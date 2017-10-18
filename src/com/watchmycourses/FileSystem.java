@@ -178,14 +178,13 @@ public class FileSystem {
             }
 
             slot = new DirectorySlot(fileSlot);
-            if (slot.descriptorIndex != 0) //If the descriptor index points to the bitmap it is an empty slot
+            if (slot.descriptorIndex == 0) //If the descriptor index points to the bitmap it is an empty slot (ignore it)
                 continue;
 
             char[] name = fileName.toCharArray();
             for (int i = 0; i < name.length; i++) {
                 //Make sure that the input characters from the string
-                name[i] = (char) (name[i] + "").getBytes(Charset.forName("UTF-8"))[0];
-                if (name[i] != slot.name[0])
+                if (name[i] != slot.name[i])
                     continue outer;
             }
 
@@ -233,6 +232,8 @@ public class FileSystem {
             }
             else
              disk.read_block(descriptor.blockIndices[0], file.buffer);
+
+            openFileTable[openFileIndex] = file;
 
             return openFileIndex;
         } else {
@@ -357,6 +358,8 @@ public class FileSystem {
         }
 
         file.currentPosition = newPosition;
+        if(newPosition > file.fileLength)
+            file.fileLength = file.currentPosition;
 
         return bytesWritten;
     }
