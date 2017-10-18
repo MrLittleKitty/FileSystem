@@ -246,6 +246,7 @@ public class FileSystem {
     }
 
     //Copies the "count" number of bytes from the given file into the mem_area
+    //TODO---Theoretically Complete
     public int read(int handle, byte[] mem_area, int count) {
 
         if(handle < 0 || handle >= openFileTable.length)
@@ -257,12 +258,39 @@ public class FileSystem {
 
         int bytesRead = 0;
         int position = file.currentPosition;
+        int newPosition = position;
+        int currentBlock = position / LDisk.BLOCK_SIZE;
 
         //This is the loop that is going to read each individual byte
         //position + index needs to be less than file length so we don't read past the end of the file
         for(int index = 0; index < count && position + index < file.fileLength; index++) {
 
+            int tempPosition = position + index;
+            int newBlock = tempPosition / LDisk.BLOCK_SIZE;
+
+            //If the next byte to read is in the same block then copy it from the buffer
+            if(newBlock != currentBlock) {
+                //Read in the file descriptor
+                byte[] block = new byte[LDisk.BLOCK_SIZE];
+                disk.read_block(file.fileDescriptorIndex,block);
+                FileDescriptor descriptor = new FileDescriptor(block);
+
+                //Write the buffer to disk
+                disk.write_block(descriptor.blockIndices[currentBlock], file.buffer);
+
+                //Read in the new block to the buffer
+                disk.read_block(descriptor.blockIndices[newBlock], file.buffer);
+
+                currentBlock = newBlock;
+            }
+
+            int indexPosition = tempPosition % LDisk.BLOCK_SIZE;
+            mem_area[index] = file.buffer[indexPosition];
+            bytesRead++;
+            newPosition++;
         }
+
+        file.currentPosition = newPosition;
 
         return bytesRead;
     }

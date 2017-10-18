@@ -13,7 +13,7 @@ public class Main {
 	    int handle = fileSystem.open("abc");
 
 	    byte[] data = new byte[8];
-		Arrays.fill(data,(byte)9);
+		Arrays.fill(data,(byte)9); //Binary 1001
 
 		fileSystem.write(handle,data,8);
 
