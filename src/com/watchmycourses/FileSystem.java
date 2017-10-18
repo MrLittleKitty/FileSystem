@@ -138,7 +138,7 @@ public class FileSystem {
     }
 
     //Returns the file handle as an int
-    //TODO---Theoretically Complete
+
     public int open(String fileName) {
 
         //Seek to the start of the directory
@@ -149,6 +149,7 @@ public class FileSystem {
 
         outer:
         while (true) {
+            //TODO---We should only read to the end of the file(file length field)
             int bytesRead = read(0, fileSlot, 8);
 
             if (bytesRead != 8) {
