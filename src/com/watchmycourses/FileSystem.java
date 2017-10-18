@@ -13,6 +13,7 @@ import java.util.Map;
 
 public class FileSystem {
 
+    private static final int MAX_FILE_SIZE = LDisk.BLOCK_SIZE*3;
     private static final int[] MASK = new int[32];
     private static final int[] MASK2 = new int[32];
 
@@ -268,7 +269,7 @@ public class FileSystem {
             int tempPosition = position + index;
             int newBlock = tempPosition / LDisk.BLOCK_SIZE;
 
-            //If the next byte to read is in the same block then copy it from the buffer
+            //If the next byte to read is not in the same block, then we write the old block and load the new one
             if(newBlock != currentBlock) {
                 //Read in the file descriptor
                 byte[] block = new byte[LDisk.BLOCK_SIZE];
@@ -296,9 +297,68 @@ public class FileSystem {
     }
 
     //Writes the "count" number of bytes from the mem_area into the given file
+    //TODO---Theoretically Complete
     public int write(int handle, byte[] mem_area, int count) {
 
-        throw new NotImplementedException();
+        if(handle < 0 || handle >= openFileTable.length)
+            throw new IndexOutOfBoundsException("Attempted to write to an invalid file handle");
+
+        OpenFile file = openFileTable[handle];
+        if(file == null)
+            throw new IndexOutOfBoundsException("Attempted to write to an invalid file handle");
+
+        int bytesWritten = 0;
+        int position = file.currentPosition;
+        int newPosition = position;
+        int currentBlock = position / LDisk.BLOCK_SIZE;
+
+        //This is the loop that is going to write each individual byte
+        //position + index needs to be less than the max file length so we don't write past the 3rd block
+        for(int index = 0; index < count && position + index < MAX_FILE_SIZE; index++) {
+
+            int tempPosition = position + index;
+            int newBlock = tempPosition / LDisk.BLOCK_SIZE;
+
+            //If the next byte to write is in a different block then we write the current block and get a new one
+            if(newBlock != currentBlock) {
+                //Read in the file descriptor
+                byte[] block = new byte[LDisk.BLOCK_SIZE];
+                disk.read_block(file.fileDescriptorIndex,block);
+                FileDescriptor descriptor = new FileDescriptor(block);
+
+                //Write the buffer to disk
+                disk.write_block(descriptor.blockIndices[currentBlock], file.buffer);
+
+                //If the index of the data block is 0 then the block hasnt been allocated yet
+                if(descriptor.blockIndices[newBlock] == 0) {
+                    descriptor.blockIndices[newBlock] = allocateNewDataBlock();
+
+                    if(descriptor.blockIndices[newBlock] == -1) {
+                        System.out.println("There are no free data blocks to allocate for this file");
+                        return -1;
+                    }
+
+                    //Write the descriptor to disk to make sure the indices are good
+                    disk.write_block(file.fileDescriptorIndex, descriptor.getBytes());
+
+                    //Since we just allocated the block it will be empty and we don't have to read from disk
+                    Arrays.fill(file.buffer, (byte)0);
+                }
+                else
+                    disk.read_block(descriptor.blockIndices[newBlock], file.buffer);
+
+                currentBlock = newBlock;
+            }
+
+            int indexPosition = tempPosition % LDisk.BLOCK_SIZE;
+            file.buffer[indexPosition] = mem_area[index];
+            bytesWritten++;
+            newPosition++;
+        }
+
+        file.currentPosition = newPosition;
+
+        return bytesWritten;
     }
 
 
