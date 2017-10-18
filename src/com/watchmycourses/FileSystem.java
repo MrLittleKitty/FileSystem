@@ -6,6 +6,7 @@ import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -231,6 +232,7 @@ public class FileSystem {
 
 
     //Seek to a new position of the specified file
+    //TODO---Theoretically Compete
     public void lseek(int handle, int position) {
 
         if (handle < 0 || handle >= openFileTable.length)
@@ -267,11 +269,22 @@ public class FileSystem {
 
                 //This means that there is no allocated space for this data block
                 if(blockIndex == 0) {
+                    //Allocate a new data block for this file
+                    blockIndex = allocateNewDataBlock();
+                    if(blockIndex == -1) {
+                        System.out.println("There are no free data blocks to allocate for this file");
+                        return;
+                    }
+                    //Makre sure the descriptor has the correct block index
+                    descriptor.blockIndices[newBlock] = blockIndex;
+                    //Write the descriptor to disk so all the file indices are correct
+                    disk.write_block(file.fileDescriptorIndex,descriptor.getBytes());
 
+                    //Since we allocated a new block its going to be empty and we don't need to read it in
+                    Arrays.fill(block, (byte)0);
                 }
-
-                //Read in the block
-                disk.read_block(blockIndex, block);
+                else //Read in the block
+                    disk.read_block(blockIndex, block);
 
                 //Set the new position for the open file and set the buffer correctly
                 file.currentPosition = position;
@@ -294,6 +307,34 @@ public class FileSystem {
     //Save the disk to the file
     public void save(File file) {
 
+    }
+
+    private int allocateNewDataBlock() {
+
+        int[] bitmap = getBitMap();
+        int freeBlockIndex = -1;
+
+        outer:
+        for (int i = 0; i < 2; i++) {
+            for (int j = 0; j < 32; j++) {
+
+                if (j + (32 * i) < k) //If they arent in the data area then continue looking
+                    continue;
+
+                int test = bitmap[i] & MASK[j];
+                if (test == 0) {
+                    freeBlockIndex = j + (32 * i);
+                    break outer;
+                }
+            }
+        }
+
+        //If we found a free data block then mark it as taken
+        if (freeBlockIndex != -1) {
+            setBlockUsed(freeBlockIndex);
+        }
+
+        return freeBlockIndex;
     }
 
     private boolean isFreeBlock(int blockIndex) {
