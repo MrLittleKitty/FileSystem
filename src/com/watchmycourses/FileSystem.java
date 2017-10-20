@@ -3,10 +3,12 @@ package com.watchmycourses;
 import com.sun.org.apache.bcel.internal.generic.LDIV;
 import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 
-import java.io.File;
-import java.io.IOException;
+import java.io.*;
 import java.nio.charset.Charset;
+import java.nio.file.Files;
 import java.util.*;
+
+import static java.nio.file.Files.readAllBytes;
 
 public class FileSystem {
 
@@ -27,6 +29,7 @@ public class FileSystem {
     private final LDisk disk;
     private final OpenFile[] openFileTable;
     private final int k;
+    private final int L;
 
     //L = number of blocks of disk space
     //B = size of a block in bytes
@@ -37,6 +40,7 @@ public class FileSystem {
         this.disk = new LDisk(L);
         this.openFileTable = new OpenFile[maxOpenFiles];
         this.k = k;
+        this.L = L;
 
         disk.write_block(0, new byte[LDisk.BLOCK_SIZE]); //Zero out the bitmap because no blocks are taken
         OpenFile directory = new OpenFile();
@@ -466,7 +470,7 @@ public class FileSystem {
             int currentBlock = file.currentPosition / LDisk.BLOCK_SIZE;
             int newBlock = position / LDisk.BLOCK_SIZE;
 
-            if(position >= file.fileLength || newBlock < 0 || newBlock > 2) {
+            if(position > file.fileLength || newBlock < 0 || newBlock > 2) {
                 System.out.println("Attempted to seek to an invalid position");
                 return;
             }
@@ -517,6 +521,7 @@ public class FileSystem {
     }
 
     //Return a list of files
+    //TODO---Theoretically Complete
     public List<String> directory() {
 
         List<String> files = new ArrayList<>();
@@ -555,13 +560,93 @@ public class FileSystem {
     }
 
     //Restore the disk from the file or else create a new disk if the file doesnt exist
+    //TODO---Theoretically Complete
     public void init(File file) {
 
+        byte[] block = new byte[LDisk.BLOCK_SIZE];
+
+        //First we completely rewrite the disk with the contents of the file
+        try(FileReader fileStream = new FileReader(file)) {
+            try(BufferedReader reader = new BufferedReader(fileStream)) {
+
+                int blockNumber = 0;
+                String line = null;
+                while((line = reader.readLine()) != null) {
+
+                    String[] bytes = line.split(" ");
+
+                    for (int i = 0; i < LDisk.BLOCK_SIZE; i++) {
+                        block[i] = Byte.parseByte(bytes[i]);
+                    }
+
+                    disk.write_block(blockNumber, block);
+                    blockNumber++;
+                }
+            }
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        //Next we reload the directory open file from the disk
+        OpenFile directory = openFileTable[0];
+
+        //Read in the updated file descriptor for the directory
+        disk.read_block(directory.fileDescriptorIndex,block);
+        FileDescriptor descriptor = new FileDescriptor(block);
+
+        //Update the file length and the current position
+        directory.fileLength = descriptor.fileLength;
+        directory.currentPosition = 0;
+
+        //If there is an allocated data block for the directory, load it
+        if(descriptor.blockIndices[0] != 0) {
+            disk.read_block(descriptor.blockIndices[0],directory.buffer);
+        }
+        else //if no allocated data, zero out the buffer
+            Arrays.fill(directory.buffer, (byte)0);
     }
 
     //Save the disk to the file
+    //TODO---Theoretically Complete
     public void save(File file) {
 
+        byte[] block = new byte[LDisk.BLOCK_SIZE];
+
+        OpenFile directory = openFileTable[0];
+        int blockIndex = directory.currentPosition / LDisk.BLOCK_SIZE;
+
+        //Read in the directory file descriptor
+        disk.read_block(directory.fileDescriptorIndex,block);
+        FileDescriptor descriptor = new FileDescriptor(block);
+
+        //Update the file length field and write it to disk
+        descriptor.fileLength = directory.fileLength;
+        disk.write_block(directory.fileDescriptorIndex,descriptor.getBytes());
+
+        //Write the directory buffer to disk
+        disk.write_block(descriptor.blockIndices[blockIndex], directory.buffer);
+
+        try(FileWriter stream = new FileWriter(file)) {
+            try(BufferedWriter writer = new BufferedWriter(stream)) {
+                for(int i = 0; i < L; i++) {
+                    disk.read_block(i,block);
+
+                    StringBuilder builder = new StringBuilder();
+                    for (byte b : block) {
+                        builder.append(b).append(" ");
+                    }
+
+                    writer.write(builder.toString());
+                    writer.newLine();
+                }
+
+                writer.flush();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     private int allocateNewDataBlock() {
@@ -590,15 +675,6 @@ public class FileSystem {
         }
 
         return freeBlockIndex;
-    }
-
-    private boolean isFreeBlock(int blockIndex) {
-        int[] bitmap = getBitMap();
-
-        int j = blockIndex / 32;
-        int i = blockIndex % 32;
-
-        return (bitmap[i] & MASK[j]) == 0;
     }
 
     private void setBlockFree(int blockIndex) {
