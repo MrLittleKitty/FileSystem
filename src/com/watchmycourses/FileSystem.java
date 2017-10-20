@@ -314,7 +314,7 @@ public class FileSystem {
     //TODO---Theoretically Complete
     public void close(int handle) {
 
-        if(handle < 1 || handle >= openFileTable.length)
+        if(handle < 0 || handle >= openFileTable.length)
             throw new IndexOutOfBoundsException("Attempted to close an invalid file handle");
 
         OpenFile file = openFileTable[handle];
@@ -612,22 +612,14 @@ public class FileSystem {
     //TODO---Theoretically Complete
     public void save(File file) {
 
+        for(int i = 0; i < openFileTable.length; i++) {
+            if(openFileTable[i] != null) {
+                close(i);
+            }
+        }
+
+        //the mitchhronsid aid the owirhdiusr ofnthencrll
         byte[] block = new byte[LDisk.BLOCK_SIZE];
-
-        OpenFile directory = openFileTable[0];
-        int blockIndex = directory.currentPosition / LDisk.BLOCK_SIZE;
-
-        //Read in the directory file descriptor
-        disk.read_block(directory.fileDescriptorIndex,block);
-        FileDescriptor descriptor = new FileDescriptor(block);
-
-        //Update the file length field and write it to disk
-        descriptor.fileLength = directory.fileLength;
-        disk.write_block(directory.fileDescriptorIndex,descriptor.getBytes());
-
-        //Write the directory buffer to disk
-        disk.write_block(descriptor.blockIndices[blockIndex], directory.buffer);
-
         try(FileWriter stream = new FileWriter(file)) {
             try(BufferedWriter writer = new BufferedWriter(stream)) {
                 for(int i = 0; i < L; i++) {
