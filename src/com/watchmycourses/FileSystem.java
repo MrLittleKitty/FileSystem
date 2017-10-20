@@ -6,10 +6,7 @@ import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public class FileSystem {
 
@@ -142,7 +139,74 @@ public class FileSystem {
     }
 
     //Destroy a file
+    //TODO---Theoretically Complete
     public void destroy(String fileName) {
+
+        //Seek to the start of the directory
+        lseek(0, 0);
+
+        DirectorySlot slot = null;
+        byte[] fileSlot = new byte[8];
+
+        OpenFile directoryFile = openFileTable[0];
+        int position = 0;
+
+        outer:
+        while (true) {
+            position += 8;
+
+            //If the next read would put us past the end of the file then there is no file with that name and we return
+            if(position > directoryFile.fileLength)
+            {
+                System.out.println("Could not find the file with the given name. Reached EOF.");
+                return;
+            }
+
+            int bytesRead = read(0, fileSlot, 8);
+
+            if (bytesRead != 8) {
+                System.out.println("Could not find the file with the given name");
+                return;
+            }
+
+            slot = new DirectorySlot(fileSlot);
+            if (slot.descriptorIndex == 0) //If the descriptor index points to the bitmap it is an empty slot (ignore it)
+                continue;
+
+            char[] name = fileName.toCharArray();
+            for (int i = 0; i < name.length; i++) {
+                //Make sure that the input characters from the string
+                if (name[i] != slot.name[i])
+                    continue outer;
+            }
+
+            //If we get here then we found the slot for the file
+            break;
+        }
+
+        //The position of the file slot in the directory
+        position -= 8;
+
+        //Read in the file descriptor
+        byte[] block = new byte[LDisk.BLOCK_SIZE];
+        disk.read_block(slot.descriptorIndex,block);
+        FileDescriptor descriptor = new FileDescriptor(block);
+
+        //If any of the data blocks in this file are used then mark them as free
+        for(int index : descriptor.blockIndices) {
+            if(index != 0) {
+                setBlockFree(index);
+            }
+        }
+
+        //Free the file descriptor block
+        setBlockFree(slot.descriptorIndex);
+
+        //Overwrite the file slot in the directory
+        Arrays.fill(fileSlot, (byte)0);
+        lseek(0, position);
+        write(0, fileSlot, 8);
+
 
     }
 
@@ -243,8 +307,32 @@ public class FileSystem {
     }
 
     //Takes the file handle of the file to close
+    //TODO---Theoretically Complete
     public void close(int handle) {
 
+        if(handle < 1 || handle >= openFileTable.length)
+            throw new IndexOutOfBoundsException("Attempted to close an invalid file handle");
+
+        OpenFile file = openFileTable[handle];
+        if(file == null)
+            throw new IndexOutOfBoundsException("Attempted to close an invalid file handle");
+
+        byte[] block = new byte[LDisk.BLOCK_SIZE];
+
+        //Read in the file descriptor
+        disk.read_block(file.fileDescriptorIndex,block);
+        FileDescriptor descriptor = new FileDescriptor(block);
+
+        //Write the buffer out to the correct block
+        int currentBufferBlock = file.currentPosition / LDisk.BLOCK_SIZE;
+        disk.write_block(descriptor.blockIndices[currentBufferBlock], file.buffer);
+
+        //Update the descriptor's file length and write it back to disk
+        descriptor.fileLength = file.fileLength;
+        disk.write_block(file.fileDescriptorIndex, descriptor.getBytes());
+
+        //Clear entry from the open file table
+        openFileTable[handle] = null;
     }
 
     //Copies the "count" number of bytes from the given file into the mem_area
@@ -430,7 +518,40 @@ public class FileSystem {
 
     //Return a list of files
     public List<String> directory() {
-        throw new NotImplementedException();
+
+        List<String> files = new ArrayList<>();
+        //Seek to the start of the directory
+        lseek(0, 0);
+
+        DirectorySlot slot = null;
+        byte[] fileSlot = new byte[8];
+
+        OpenFile directoryFile = openFileTable[0];
+        int position = 0;
+
+        outer:
+        while (true) {
+            position += 8;
+
+            //If the next read would put us past the end of the file then there is no file with that name and we return
+            if(position > directoryFile.fileLength)
+               break;
+
+            int bytesRead = read(0, fileSlot, 8);
+
+            if (bytesRead != 8) {
+                System.out.println("Could not find the file with the given name");
+                return files;
+            }
+
+            slot = new DirectorySlot(fileSlot);
+            if (slot.descriptorIndex == 0) //If the descriptor index points to the bitmap it is an empty slot (ignore it)
+                continue;
+
+            files.add(new String(slot.name));
+        }
+
+        return files;
     }
 
     //Restore the disk from the file or else create a new disk if the file doesnt exist
