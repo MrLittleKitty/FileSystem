@@ -1,6 +1,7 @@
 package com.watchmycourses;
 
 import com.sun.org.apache.bcel.internal.generic.LDIV;
+import org.omg.SendingContext.RunTime;
 import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 
 import java.io.*;
@@ -68,8 +69,7 @@ public class FileSystem {
     public void create(String fileName) {
 
         if (fileName.length() > 4) {
-            System.out.println("Error. Filename is longer than 4 characters.");
-            return;
+            throw new RuntimeException("Name is longer than 4 characters");
         }
 
         int[] bitmap = getBitMap();
@@ -99,6 +99,37 @@ public class FileSystem {
             OpenFile directoryFile = openFileTable[0];
             int position = 0;
 
+            //Make sure another file with the same name doesn't already exist
+            outer:
+            while (true) {
+                position += 8;
+                //If the next read would put us past the end of the file then there is no conflicting file
+                if(position > directoryFile.fileLength)
+                    break;
+
+                int bytesRead = read(0, slot, 8);
+
+                if (bytesRead != 8) {
+                    break;
+                }
+
+                DirectorySlot s = new DirectorySlot(slot);
+                if (s.descriptorIndex == 0) //If the descriptor index points to the bitmap it is an empty slot (ignore it)
+                    continue;
+
+                char[] name = fileName.toCharArray();
+                for (int i = 0; i < name.length; i++) {
+                    //Make sure that the input characters from the string
+                    if (name[i] != s.name[i])
+                        continue outer;
+                }
+
+                //If we get here then we found the slot for the file
+                throw new RuntimeException("A file with that name already exists");
+            }
+
+            position = 0;
+
             //Go through all the slots in the directory and look for an open one
             while (true) {
                 position += 8;
@@ -110,8 +141,7 @@ public class FileSystem {
                 int bytesRead = read(0, slot, 8);
 
                 if (bytesRead != 8) {
-                    System.out.println("Error. No free file slot in the directory.");
-                    return;
+                    throw new RuntimeException("No open directory slot");
                 }
 
                 DirectorySlot directorySlot = new DirectorySlot(slot);
@@ -139,7 +169,7 @@ public class FileSystem {
             write(0,newSlot.getBytes(),8);
 
         } else
-            System.out.println("Error. No free file descriptor for new file.");
+            throw new RuntimeException("No free file descriptor");
     }
 
     //Destroy a file
@@ -161,17 +191,14 @@ public class FileSystem {
 
             //If the next read would put us past the end of the file then there is no file with that name and we return
             if(position > directoryFile.fileLength)
-            {
-                System.out.println("Could not find the file with the given name. Reached EOF.");
-                return;
-            }
+                throw new RuntimeException("Could not find a file with the given name");
+
 
             int bytesRead = read(0, fileSlot, 8);
 
-            if (bytesRead != 8) {
-                System.out.println("Could not find the file with the given name");
-                return;
-            }
+            if (bytesRead != 8)
+                throw new RuntimeException("Could not find a file with the given name");
+
 
             slot = new DirectorySlot(fileSlot);
             if (slot.descriptorIndex == 0) //If the descriptor index points to the bitmap it is an empty slot (ignore it)
@@ -233,16 +260,12 @@ public class FileSystem {
 
             //If the next read would put us past the end of the file then there is no file with that name and we return
             if(position > directoryFile.fileLength)
-            {
-                System.out.println("Could not find the file with the given name. Reached EOF.");
-                return -1;
-            }
+                throw new RuntimeException("Could not find a file with the given name");
 
             int bytesRead = read(0, fileSlot, 8);
 
             if (bytesRead != 8) {
-                System.out.println("Could not find the file with the given name");
-                return -1;
+                throw new RuntimeException("Could not find a file with the given name");
             }
 
             slot = new DirectorySlot(fileSlot);
@@ -258,6 +281,13 @@ public class FileSystem {
 
             //If we get here then we found the slot for the file
             break;
+        }
+
+        for(int i = 0; i < openFileTable.length; i++) {
+            if(openFileTable[i] != null) {
+                if(openFileTable[i].fileDescriptorIndex == slot.descriptorIndex)
+                    throw new RuntimeException("Attempted to open a file that is already open");
+            }
         }
 
         int openFileIndex = -1;
@@ -287,10 +317,8 @@ public class FileSystem {
             if(descriptor.blockIndices[0] == 0) {
                 descriptor.blockIndices[0] = allocateNewDataBlock();
 
-                if(descriptor.blockIndices[0] == -1) {
-                    System.out.println("There are no free data blocks to allocate for this file");
-                    return -1;
-                }
+                if(descriptor.blockIndices[0] == -1)
+                    throw new RuntimeException("There are no free data blocks to allocate");
 
                 //Write the descriptor to disk to make sure the indices are good
                 disk.write_block(slot.descriptorIndex, descriptor.getBytes());
@@ -305,8 +333,7 @@ public class FileSystem {
 
             return openFileIndex;
         } else {
-            System.out.println("You have opened the maximum amount of files.");
-            return -1;
+            throw new RuntimeException("Opened the max amount of files");
         }
     }
 
@@ -427,8 +454,7 @@ public class FileSystem {
                     descriptor.blockIndices[newBlock] = allocateNewDataBlock();
 
                     if(descriptor.blockIndices[newBlock] == -1) {
-                        System.out.println("There are no free data blocks to allocate for this file");
-                        return -1;
+                        throw new RuntimeException("Could not allocate any more data blocks");
                     }
 
                     //Write the descriptor to disk to make sure the indices are good
@@ -471,8 +497,7 @@ public class FileSystem {
             int newBlock = position / LDisk.BLOCK_SIZE;
 
             if(position > file.fileLength || newBlock < 0 || newBlock > 2) {
-                System.out.println("Attempted to seek to an invalid position");
-                return;
+                throw new RuntimeException("Attempted to seek to an invalid position");
             }
 
             if(currentBlock == newBlock) {
@@ -498,8 +523,7 @@ public class FileSystem {
                     //Allocate a new data block for this file
                     blockIndex = allocateNewDataBlock();
                     if(blockIndex == -1) {
-                        System.out.println("There are no free data blocks to allocate for this file");
-                        return;
+                        throw new RuntimeException("No free data blocks to allocate");
                     }
                     //Makre sure the descriptor has the correct block index
                     descriptor.blockIndices[newBlock] = blockIndex;
@@ -517,7 +541,7 @@ public class FileSystem {
                 file.buffer = block;
             }
         } else
-            System.out.println("Attempted to seek on an invalid file handle");
+            throw new RuntimeException("Attempted to seek on an invalid file handle");
     }
 
     //Return a list of files
@@ -542,12 +566,7 @@ public class FileSystem {
             if(position > directoryFile.fileLength)
                break;
 
-            int bytesRead = read(0, fileSlot, 8);
-
-            if (bytesRead != 8) {
-                System.out.println("Could not find the file with the given name");
-                return files;
-            }
+            read(0, fileSlot, 8);
 
             slot = new DirectorySlot(fileSlot);
             if (slot.descriptorIndex == 0) //If the descriptor index points to the bitmap it is an empty slot (ignore it)
@@ -584,9 +603,9 @@ public class FileSystem {
                 }
             }
         } catch (FileNotFoundException e) {
-            e.printStackTrace();
+            throw new RuntimeException("File not found");
         } catch (IOException e) {
-            e.printStackTrace();
+            throw new RuntimeException("IO Exception");
         }
 
         //Next we reload the directory open file from the disk
@@ -637,7 +656,7 @@ public class FileSystem {
                 writer.flush();
             }
         } catch (IOException e) {
-            e.printStackTrace();
+            throw new RuntimeException("IOException");
         }
     }
 

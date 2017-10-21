@@ -2,18 +2,25 @@ package com.watchmycourses;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 public class Driver {
 
-    FileSystem fileSystem = null;
+    private FileSystem fileSystem = null;
+    public List<String> output;
 
     void create(String name) {
         if(fileSystem == null)
             output("error");
         else {
-            fileSystem.create(name);
-            output(name+" created");
+            try{
+                fileSystem.create(name);
+                output(name+" created");
+            }
+            catch(Throwable t) {
+                output("error");
+            }
         }
     }
 
@@ -21,17 +28,27 @@ public class Driver {
         if(fileSystem == null)
             output("error");
         else {
-            fileSystem.destroy(name);
-            output(name+" destroyed");
+            try {
+                fileSystem.destroy(name);
+                output(name + " destroyed");
+            }
+            catch(Throwable t) {
+                output("error");
+            }
         }
     }
 
     void open(String name) {
-        if(fileSystem == null)S
+        if(fileSystem == null)
             output("error");
         else {
-            int index = fileSystem.open(name);
-            output(name+" opened "+index);
+            try {
+                int index = fileSystem.open(name);
+                output(name+" opened "+index);
+            }
+            catch(Throwable t) {
+                output("error");
+            }
         }
     }
 
@@ -39,8 +56,13 @@ public class Driver {
         if(fileSystem == null)
             output("error");
         else {
-            fileSystem.close(index);
-            output(index+" closed");
+            try {
+                fileSystem.close(index);
+                output(index+" closed");
+            }
+            catch(Throwable t) {
+                output("error");
+            }
         }
     }
 
@@ -48,21 +70,54 @@ public class Driver {
         if(fileSystem == null)
             output("error");
         else {
-            byte[] mem = new byte[count];
-            fileSystem.read(index,mem,count);
+            try {
+                byte[] mem = new byte[count];
+                int numRead = fileSystem.read(index,mem,count);
+
+                char[] chars = new char[numRead];
+                for(int i = 0; i < numRead; i++) {
+                    chars[i] = (char)mem[i];
+                }
+                output(new String(chars));
+            }
+            catch(Throwable t) {
+                output("error");
+            }
         }
     }
 
     void write(int index, char letter, int count) {
+        if(fileSystem == null)
+            output("error");
+        else {
+            try {
+                byte b = (""+letter).getBytes()[0];
 
+                byte[] bytes = new byte[count];
+                for(int i = 0; i < count; i++) {
+                    bytes[i] = b;
+                }
+
+                fileSystem.write(index, bytes, count);
+                output(count+" bytes written");
+            }
+            catch(Throwable t) {
+                output("error");
+            }
+        }
     }
 
     void seek(int index, int position) {
         if(fileSystem == null)
             output("error");
         else {
-            fileSystem.lseek(index, position);
-            output("position is "+position);
+            try {
+                fileSystem.lseek(index, position);
+                output("position is "+position);
+            }
+            catch(Throwable t) {
+                output("error");
+            }
         }
     }
 
@@ -71,15 +126,25 @@ public class Driver {
         if(fileSystem == null)
             output("error");
         else {
-            List<String> files = fileSystem.directory();
-            StringBuilder builder = new StringBuilder();
-            for(String f : files) {
-                builder.append(f).append(" ");
+            try {
+                List<String> files = fileSystem.directory();
+                StringBuilder builder = new StringBuilder();
+                for(String f : files) {
+                    builder.append(f).append(" ");
+                }
+                if(files.size() > 0)
+                    builder.setLength(builder.length()-1);
+                output(builder.toString());
             }
-            if(files.size() > 0)
-                builder.setLength(builder.length()-1);
-            output(builder.toString());
+            catch(Throwable t) {
+                output("error");
+            }
         }
+    }
+
+    void init() {
+        fileSystem = new FileSystem(64,24,3);
+        output("disk initialized");
     }
 
     void init(String fileName) {
@@ -90,8 +155,13 @@ public class Driver {
             output("disk initialized");
         }
         else {
-            fileSystem.init(file);
-            output("disk restored");
+            try {
+                fileSystem.init(file);
+                output("disk restored");
+            }
+            catch(Throwable t) {
+                output("error");
+            }
         }
     }
 
@@ -102,19 +172,24 @@ public class Driver {
             try {
                 file.createNewFile();
             } catch (IOException e) {
-                e.printStackTrace();
+                output("error");
             }
         }
 
         if(fileSystem == null)
             output("error");
         else {
-            fileSystem.save(file);
-            output("disk saved");
+            try {
+                fileSystem.save(file);
+                output("disk saved");
+            }
+            catch(Throwable t) {
+                output("error");
+            }
         }
     }
 
     void output(String text) {
-        System.out.println(text);
+        output.add(text);
     }
 }
