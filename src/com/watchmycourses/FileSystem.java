@@ -14,6 +14,7 @@ import static java.nio.file.Files.readAllBytes;
 public class FileSystem {
 
     private static final int MAX_FILE_SIZE = LDisk.BLOCK_SIZE*3;
+    private static final int DESCRIPTORS_PER_BLOCK = 4;
     private static final int[] MASK = new int[32];
     private static final int[] MASK2 = new int[32];
 
@@ -29,7 +30,7 @@ public class FileSystem {
 
     private final LDisk disk;
     private final OpenFile[] openFileTable;
-    private final int k;
+    private final int firstDataBlock;
     private final int L;
 
     //L = number of blocks of disk space
@@ -40,28 +41,32 @@ public class FileSystem {
 
         this.disk = new LDisk(L);
         this.openFileTable = new OpenFile[maxOpenFiles];
-        this.k = k;
         this.L = L;
 
         disk.write_block(0, new byte[LDisk.BLOCK_SIZE]); //Zero out the bitmap because no blocks are taken
         OpenFile directory = new OpenFile();
         directory.currentPosition = 0;
-        directory.fileDescriptorIndex = 1;
+        directory.fileDescriptorIndex = 0; //The first file descriptor is index 0
         directory.fileLength = 0;
 
         this.openFileTable[0] = directory;
 
+        int numOfReservedDescriptorBlocks = k / DESCRIPTORS_PER_BLOCK;
+        firstDataBlock = numOfReservedDescriptorBlocks + 1;
+
         //Create a descriptor so we can set its first data block at k+1
         FileDescriptor descriptor = new FileDescriptor();
-        descriptor.blockIndices = new int[]{k + 1, 0, 0};
+        descriptor.blockIndices = new int[]{firstDataBlock, 0, 0};
         descriptor.fileLength = 0;
 
-        //Write the directory descriptor at its reserved block
-        disk.write_block(1, descriptor.getBytes());
+        //Write the directory descriptor at its reserved space (first part of the second block)
+        byte[] block = new byte[LDisk.BLOCK_SIZE];
+        descriptor.populateBytes(block,0);
+        disk.write_block(1, block);
 
         setBlockUsed(0); //The first block is used for this bitmap
-        setBlockUsed(1); //The second block is used for the directory file descriptor
-        setBlockUsed(k + 1); //The first data block is for the directory data
+        setBlockUsed(1); //The second block has the the descriptor for the directory in it
+        setBlockUsed(firstDataBlock); //The first data block is for the directory data
     }
 
     //Create a file
@@ -72,26 +77,24 @@ public class FileSystem {
             throw new RuntimeException("Name is longer than 4 characters");
         }
 
-        int[] bitmap = getBitMap();
-
-        int freeBlockIndex = -1;
-
+        int freeDescriptorIndex = -1;
+        //Were going to iterate through all the descriptor blocks and look for a free slot
         outer:
-        for (int i = 0; i < 2; i++) {
-            for (int j = 0; j < 32; j++) {
+        for(int i = 1; i < firstDataBlock; i++) {
+            byte[] block = new byte[LDisk.BLOCK_SIZE];
+            disk.read_block(i,block);
 
-                if (j + (32 * i) > k) //Don't let them leave the file descriptor area
-                    break outer;
+            //Iterate through all descriptors in this block
+            for(int j = 0; j < DESCRIPTORS_PER_BLOCK; j++) {
+                if(FileDescriptor.isFreeDescriptor(block,(j*16))) {
 
-                int test = bitmap[i] & MASK[j];
-                if (test == 0) {
-                    freeBlockIndex = j + (32 * i);
+                    freeDescriptorIndex = ((i-1)*DESCRIPTORS_PER_BLOCK)+j;
                     break outer;
                 }
             }
         }
 
-        if (freeBlockIndex != -1) {
+        if (freeDescriptorIndex != -1) {
             lseek(0, 0);
 
             byte[] slot = new byte[8];
@@ -156,14 +159,15 @@ public class FileSystem {
 
             DirectorySlot newSlot = new DirectorySlot();
             newSlot.name = fileName.toCharArray();
-            newSlot.descriptorIndex = freeBlockIndex;
+            newSlot.descriptorIndex = freeDescriptorIndex;
 
             FileDescriptor descriptor = new FileDescriptor();
             descriptor.fileLength = 0;
             descriptor.blockIndices = new int[3];
 
-            disk.write_block(freeBlockIndex, descriptor.getBytes());
-            setBlockUsed(freeBlockIndex);
+            writeDescriptor(freeDescriptorIndex, descriptor);
+            //Make sure we mark this block as being used because it has at least one descriptor in it
+            setBlockUsed(getDescriptorBlockNumber(freeDescriptorIndex));
 
             lseek(0,position);
             write(0,newSlot.getBytes(),8);
@@ -220,8 +224,11 @@ public class FileSystem {
 
         //Read in the file descriptor
         byte[] block = new byte[LDisk.BLOCK_SIZE];
-        disk.read_block(slot.descriptorIndex,block);
-        FileDescriptor descriptor = new FileDescriptor(block);
+        int blockNumber = getDescriptorBlockNumber(slot.descriptorIndex);
+        int positionInBlock = getDescriptorPositionInBlock(slot.descriptorIndex);
+
+        disk.read_block(blockNumber,block);
+        FileDescriptor descriptor = new FileDescriptor(block,getDescriptorBytePositionInBlock(slot.descriptorIndex));
 
         //If any of the data blocks in this file are used then mark them as free
         for(int index : descriptor.blockIndices) {
@@ -230,15 +237,30 @@ public class FileSystem {
             }
         }
 
-        //Free the file descriptor block
-        setBlockFree(slot.descriptorIndex);
+        boolean blockEmpty = false;
+        for(int i = 0; i < DESCRIPTORS_PER_BLOCK; i++) {
+
+            //Ignore the descriptor for the file we are destroying
+            if(i != positionInBlock) {
+                //If the descriptor isnt free then this block isnt empty
+                if(!FileDescriptor.isFreeDescriptor(block,i*16))
+                {
+                    blockEmpty = false;
+                    break;
+                }
+
+                //If the descriptor is free then mark this block as being free (for now)
+                blockEmpty = true;
+            }
+        }
+        //Free the file descriptor block (if there are no more descriptors in it)
+        if(blockEmpty)
+            setBlockFree(blockNumber);
 
         //Overwrite the file slot in the directory
         Arrays.fill(fileSlot, (byte)0);
         lseek(0, position);
         write(0, fileSlot, 8);
-
-
     }
 
     //Returns the file handle as an int
@@ -306,9 +328,12 @@ public class FileSystem {
             file.fileDescriptorIndex = slot.descriptorIndex;
 
             byte[] block = new byte[LDisk.BLOCK_SIZE];
-            disk.read_block(slot.descriptorIndex, block);
+            int blockNumber = getDescriptorBlockNumber(slot.descriptorIndex);
+            int bytePositionInBlock = getDescriptorBytePositionInBlock(slot.descriptorIndex);
 
-            FileDescriptor descriptor = new FileDescriptor(block);
+            disk.read_block(blockNumber, block);
+
+            FileDescriptor descriptor = new FileDescriptor(block, bytePositionInBlock);
 
             file.fileLength = descriptor.fileLength;
             file.buffer = new byte[LDisk.BLOCK_SIZE];
@@ -321,7 +346,8 @@ public class FileSystem {
                     throw new RuntimeException("There are no free data blocks to allocate");
 
                 //Write the descriptor to disk to make sure the indices are good
-                disk.write_block(slot.descriptorIndex, descriptor.getBytes());
+                descriptor.populateBytes(block, bytePositionInBlock);
+                disk.write_block(blockNumber, block);
 
                 //Since we just allocated the block it will be empty and we don't have to read from disk
                 Arrays.fill(file.buffer, (byte)0);
@@ -351,8 +377,11 @@ public class FileSystem {
         byte[] block = new byte[LDisk.BLOCK_SIZE];
 
         //Read in the file descriptor
-        disk.read_block(file.fileDescriptorIndex,block);
-        FileDescriptor descriptor = new FileDescriptor(block);
+        int blockNumber = getDescriptorBlockNumber(file.fileDescriptorIndex);
+        int bytePositionInBlock = getDescriptorBytePositionInBlock(file.fileDescriptorIndex);
+
+        disk.read_block(blockNumber, block);
+        FileDescriptor descriptor = new FileDescriptor(block, bytePositionInBlock);
 
         //Write the buffer out to the correct block
         int currentBufferBlock = file.currentPosition / LDisk.BLOCK_SIZE;
@@ -360,7 +389,9 @@ public class FileSystem {
 
         //Update the descriptor's file length and write it back to disk
         descriptor.fileLength = file.fileLength;
-        disk.write_block(file.fileDescriptorIndex, descriptor.getBytes());
+
+        descriptor.populateBytes(block, bytePositionInBlock);
+        disk.write_block(blockNumber, block);
 
         //Clear entry from the open file table
         openFileTable[handle] = null;
@@ -382,6 +413,14 @@ public class FileSystem {
         int newPosition = position;
         int currentBlock = position / LDisk.BLOCK_SIZE;
 
+        byte[] block = new byte[LDisk.BLOCK_SIZE];
+
+        int blockNumber = getDescriptorBlockNumber(file.fileDescriptorIndex);
+        int bytePositionInBlock = getDescriptorBytePositionInBlock(file.fileDescriptorIndex);
+
+        disk.read_block(blockNumber,block);
+        FileDescriptor descriptor = new FileDescriptor(block, bytePositionInBlock);
+
         //This is the loop that is going to read each individual byte
         //position + index needs to be less than file length so we don't read past the end of the file
         for(int index = 0; index < count && position + index < file.fileLength; index++) {
@@ -391,10 +430,6 @@ public class FileSystem {
 
             //If the next byte to read is not in the same block, then we write the old block and load the new one
             if(newBlock != currentBlock) {
-                //Read in the file descriptor
-                byte[] block = new byte[LDisk.BLOCK_SIZE];
-                disk.read_block(file.fileDescriptorIndex,block);
-                FileDescriptor descriptor = new FileDescriptor(block);
 
                 //Write the buffer to disk
                 disk.write_block(descriptor.blockIndices[currentBlock], file.buffer);
@@ -432,6 +467,10 @@ public class FileSystem {
         int newPosition = position;
         int currentBlock = position / LDisk.BLOCK_SIZE;
 
+        byte[] block = new byte[LDisk.BLOCK_SIZE];
+        int blockNumber = getDescriptorBlockNumber(file.fileDescriptorIndex);
+        int bytePositionInBlock = getDescriptorBytePositionInBlock(file.fileDescriptorIndex);
+
         //This is the loop that is going to write each individual byte
         //position + index needs to be less than the max file length so we don't write past the 3rd block
         for(int index = 0; index < count && position + index < MAX_FILE_SIZE; index++) {
@@ -441,10 +480,10 @@ public class FileSystem {
 
             //If the next byte to write is in a different block then we write the current block and get a new one
             if(newBlock != currentBlock) {
+
                 //Read in the file descriptor
-                byte[] block = new byte[LDisk.BLOCK_SIZE];
-                disk.read_block(file.fileDescriptorIndex,block);
-                FileDescriptor descriptor = new FileDescriptor(block);
+                disk.read_block(blockNumber,block);
+                FileDescriptor descriptor = new FileDescriptor(block, bytePositionInBlock);
 
                 //Write the buffer to disk
                 disk.write_block(descriptor.blockIndices[currentBlock], file.buffer);
@@ -458,7 +497,8 @@ public class FileSystem {
                     }
 
                     //Write the descriptor to disk to make sure the indices are good
-                    disk.write_block(file.fileDescriptorIndex, descriptor.getBytes());
+                    descriptor.populateBytes(block, bytePositionInBlock);
+                    disk.write_block(blockNumber, block);
 
                     //Since we just allocated the block it will be empty and we don't have to read from disk
                     Arrays.fill(file.buffer, (byte)0);
@@ -481,7 +521,6 @@ public class FileSystem {
 
         return bytesWritten;
     }
-
 
     //Seek to a new position of the specified file
     //TODO---Theoretically Compete
@@ -506,11 +545,14 @@ public class FileSystem {
             else {
                 byte[] block = new byte[LDisk.BLOCK_SIZE];
 
+                int blockNumber = getDescriptorBlockNumber(file.fileDescriptorIndex);
+                int bytePositionInBlock = getDescriptorBytePositionInBlock(file.fileDescriptorIndex);
+
                 //Read in the descriptor for this file
-                disk.read_block(file.fileDescriptorIndex, block);
+                disk.read_block(blockNumber, block);
 
                 //Get the index of the correct block from the descriptor
-                FileDescriptor descriptor = new FileDescriptor(block);
+                FileDescriptor descriptor = new FileDescriptor(block, bytePositionInBlock);
                 int oldBlockIndex = descriptor.blockIndices[currentBlock];
 
                 //Write the buffer to the disk
@@ -527,8 +569,10 @@ public class FileSystem {
                     }
                     //Makre sure the descriptor has the correct block index
                     descriptor.blockIndices[newBlock] = blockIndex;
+
+                    descriptor.populateBytes(block, bytePositionInBlock);
                     //Write the descriptor to disk so all the file indices are correct
-                    disk.write_block(file.fileDescriptorIndex,descriptor.getBytes());
+                    disk.write_block(blockNumber, block);
 
                     //Since we allocated a new block its going to be empty and we don't need to read it in
                     Arrays.fill(block, (byte)0);
@@ -612,8 +656,12 @@ public class FileSystem {
         OpenFile directory = openFileTable[0];
 
         //Read in the updated file descriptor for the directory
-        disk.read_block(directory.fileDescriptorIndex,block);
-        FileDescriptor descriptor = new FileDescriptor(block);
+
+        int blockNumber = getDescriptorBlockNumber(directory.fileDescriptorIndex);
+        int bytePositionInBlock = getDescriptorBytePositionInBlock(directory.fileDescriptorIndex);
+
+        disk.read_block(blockNumber,block);
+        FileDescriptor descriptor = new FileDescriptor(block, bytePositionInBlock);
 
         //Update the file length and the current position
         directory.fileLength = descriptor.fileLength;
@@ -669,7 +717,7 @@ public class FileSystem {
         for (int i = 0; i < 2; i++) {
             for (int j = 0; j < 32; j++) {
 
-                if (j + (32 * i) < k) //If they arent in the data area then continue looking
+                if (j + (32 * i) <= firstDataBlock) //If they arent in the data area then continue looking
                     continue;
 
                 int test = bitmap[i] & MASK[j];
@@ -686,6 +734,29 @@ public class FileSystem {
         }
 
         return freeBlockIndex;
+    }
+
+    private void writeDescriptor(int descriptorIndex, FileDescriptor descriptor) {
+        byte[] block = new byte[LDisk.BLOCK_SIZE];
+
+        int blockNumber = descriptorIndex / DESCRIPTORS_PER_BLOCK;
+        int posInBlock = descriptorIndex % DESCRIPTORS_PER_BLOCK;
+
+        disk.read_block(1+blockNumber, block);
+        descriptor.populateBytes(block,16*posInBlock);
+        disk.write_block(1+blockNumber, block);
+    }
+
+    private int getDescriptorBlockNumber(int descriptorIndex) {
+        return 1+(descriptorIndex/DESCRIPTORS_PER_BLOCK);
+    }
+
+    private int getDescriptorPositionInBlock(int descriptorIndex) {
+        return descriptorIndex % DESCRIPTORS_PER_BLOCK;
+    }
+
+    private int getDescriptorBytePositionInBlock(int descriptorIndex) {
+        return getDescriptorPositionInBlock(descriptorIndex)*16;
     }
 
     private void setBlockFree(int blockIndex) {
