@@ -77,7 +77,7 @@ class CommandTest
         try {
             Write_All3Blocks_Pass();
             Write_NotOpenFile_Error();
-            Write_PastAll3Blocks_Error();
+            Write_PastAll3Blocks_Error(); //TODO----THE PROBLEM IS HERE
 
             System.out.println();
         } catch (Exception e) {
@@ -476,8 +476,10 @@ class CommandTest
         try{
             byte[] b = new byte[193];
             Arrays.fill(b,(byte)'x');
-            fs.write(index, b, 193);
+            int bytesWritten = fs.write(index, b, 193);
             result = true;
+            if(bytesWritten != 193)
+                result = false;
         }
         catch(Throwable t) {
             result = false;
@@ -562,10 +564,10 @@ class CommandTest
         }
     }
 
-    public static void main (String[] args)
-    {
-        CommandTest test = new CommandTest();
-        test.runAllTests();
-    }
+//    public static void main (String[] args)
+//    {
+//        CommandTest test = new CommandTest();
+//        test.runAllTests();
+//    }
 }
 
