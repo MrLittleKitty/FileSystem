@@ -27,4 +27,12 @@ public class DirectorySlot {
         return memory;
     }
 
+    public String getNiceName() {
+        StringBuilder builder = new StringBuilder();
+        for(char c : name) {
+            if(c != Character.UNASSIGNED)
+                builder.append(c);
+        }
+        return builder.toString();
+    }
 }

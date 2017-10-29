@@ -666,7 +666,7 @@ public class FileSystem {
             if (slot.descriptorIndex == 0) //If the descriptor index points to the bitmap it is an empty slot (ignore it)
                 continue;
 
-            files.add(new String(slot.name));
+            files.add(slot.getNiceName());
         }
 
         return files;

@@ -13,10 +13,10 @@ public class Main {
 		PrintStream out = System.out;
 
 		out.println("Enter path to input file:");
-		String inputPath = "SampleInput.txt";//scanner.nextLine();
+		String inputPath = scanner.nextLine();
 
 		out.println("Enter path to output file:");
-		String outputPath = "output.txt";//scanner.nextLine();
+		String outputPath = scanner.nextLine();
 
 		List<String> output = new ArrayList<>();
 		Driver driver = new Driver();
@@ -79,6 +79,9 @@ public class Main {
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
+
+		for(String line : output)
+			System.out.println(line);
 
 		File outputFile = new File(outputPath);
 		try(FileWriter fileWriter = new FileWriter(outputFile)) {
