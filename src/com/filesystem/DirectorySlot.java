@@ -1,4 +1,4 @@
-package com.watchmycourses;
+package com.filesystem;
 
 import java.nio.charset.Charset;
 

@@ -1,8 +1,7 @@
-package com.watchmycourses;
+package com.filesystem;
 
 import java.io.*;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Scanner;
 
@@ -14,10 +13,10 @@ public class Main {
 		PrintStream out = System.out;
 
 		out.println("Enter path to input file:");
-		String inputPath = scanner.nextLine();
+		String inputPath = "SampleInput.txt";//scanner.nextLine();
 
 		out.println("Enter path to output file:");
-		String outputPath = scanner.nextLine();
+		String outputPath = "output.txt";//scanner.nextLine();
 
 		List<String> output = new ArrayList<>();
 		Driver driver = new Driver();

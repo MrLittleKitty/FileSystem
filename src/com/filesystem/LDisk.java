@@ -1,4 +1,4 @@
-package com.watchmycourses;
+package com.filesystem;
 
 public class LDisk {
 

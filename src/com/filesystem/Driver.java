@@ -1,8 +1,8 @@
-package com.watchmycourses;
+package com.filesystem;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public class Driver {
@@ -94,9 +94,7 @@ public class Driver {
                 byte b = (""+letter).getBytes()[0];
 
                 byte[] bytes = new byte[count];
-                for(int i = 0; i < count; i++) {
-                    bytes[i] = b;
-                }
+                Arrays.fill(bytes, b);
 
                 fileSystem.write(index, bytes, count);
                 output(count+" bytes written");
@@ -143,13 +141,13 @@ public class Driver {
     }
 
     void init() {
-        fileSystem = new FileSystem(64,24,3);
+        fileSystem = new FileSystem(64,24,4);
         output("disk initialized");
     }
 
     void init(String fileName) {
 
-        fileSystem = new FileSystem(64,24,3);
+        fileSystem = new FileSystem(64,24,4);
         File file = new File(fileName);
         if(!file.exists()) {
             output("disk initialized");

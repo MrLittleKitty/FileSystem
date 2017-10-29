@@ -1,4 +1,4 @@
-package com.watchmycourses;
+package com.filesystem;
 
 public class FileDescriptor
 {
@@ -28,6 +28,7 @@ public class FileDescriptor
 
     public static boolean isFreeDescriptor(byte[] block, int index) {
         //Index + 4 is the first data block index. If that is 0 (pointing to bitmap) then the descriptor is not in use
-        return Util.unpack(index+4, block) == 0;
+        int unPacked = Util.unpack(index+4, block);
+        return unPacked == 0;
     }
 }
